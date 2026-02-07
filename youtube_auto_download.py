@@ -437,7 +437,7 @@ def main():
     try:
         # 설정 로드
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, 'config.ini')
+        config_path = os.environ.get('CONFIG_PATH', os.path.join(script_dir, 'config.ini'))
         history_path = os.path.join(script_dir, 'download_history.json')
         gcs_bucket = os.environ.get('GCS_BUCKET')
 
