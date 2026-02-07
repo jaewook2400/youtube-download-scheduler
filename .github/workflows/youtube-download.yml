@@ -18,10 +18,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
-        run: |
-          pip install yt-dlp google-auth google-auth-oauthlib google-api-python-client
-          ffmpeg -version
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install yt-dlp google-auth google-auth-oauthlib google-api-python-client
 
       - name: Create config.ini
         run: echo "${{ secrets.CONFIG_INI }}" > config.ini
