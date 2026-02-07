@@ -32,9 +32,13 @@ except ImportError:
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # 쿠키 파일 경로 (Cloud Run: /cookies/cookies.txt, 로컬: ./cookies.txt)
-COOKIES_PATH = os.environ.get('COOKIES_PATH', '/cookies/cookies.txt')
-if not os.path.exists(COOKIES_PATH):
+_cookies_candidate = os.environ.get('COOKIES_PATH', '/cookies/cookies.txt')
+if os.path.exists(_cookies_candidate):
+    COOKIES_PATH = _cookies_candidate
+    print(f"[쿠키] 쿠키 파일 발견: {COOKIES_PATH}")
+else:
     COOKIES_PATH = None
+    print(f"[쿠키] 쿠키 파일 없음: {_cookies_candidate}")
 
 
 def load_download_history(history_path: str) -> dict:
