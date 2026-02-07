@@ -10,6 +10,8 @@ import os
 import glob
 import smtplib
 import configparser
+import random
+import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -26,34 +28,184 @@ from googleapiclient.http import MediaFileUpload
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 
-def get_recommended_video(search_query: str = "podcast talk show korean") -> dict:
+def load_download_history(history_path: str) -> dict:
     """
-    YouTube에서 팟캐스트/토크 영상을 검색하여 첫 번째 결과를 반환합니다.
-
-    Args:
-        search_query: 검색 키워드
+    다운로드 기록을 로드합니다.
 
     Returns:
-        dict: 영상 정보 (url, title)
+        dict: {channel: [video_id, ...], ...}
+    """
+    if os.path.exists(history_path):
+        with open(history_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def save_download_history(history_path: str, history: dict):
+    """다운로드 기록을 저장합니다."""
+    with open(history_path, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def format_duration(seconds) -> str:
+    """
+    초 단위 시간을 [X분 Y초] 형식으로 변환합니다.
+
+    Args:
+        seconds: 초 단위 시간
+
+    Returns:
+        str: 포맷된 시간 문자열
+    """
+    if seconds is None:
+        return ""
+
+    # 정수로 변환
+    seconds = int(seconds)
+
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    if hours > 0:
+        return f"[{hours}시간 {minutes}분 {secs}초]"
+    elif minutes > 0:
+        return f"[{minutes}분 {secs}초]"
+    else:
+        return f"[{secs}초]"
+
+
+def is_video_accessible(video_url: str) -> bool:
+    """
+    영상이 다운로드 가능한지 확인합니다. (멤버십 전용 등 제외)
+
+    Args:
+        video_url: YouTube 영상 URL
+
+    Returns:
+        bool: 다운로드 가능 여부
     """
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
+        'skip_download': True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(video_url, download=False)
+        return True
+    except Exception as e:
+        error_msg = str(e).lower()
+        # 멤버십 전용, 비공개, 연령 제한 등 확인
+        if any(keyword in error_msg for keyword in ['member', 'private', 'unavailable', 'age', 'sign in']):
+            return False
+        return False
+
+
+def get_random_video_from_channel(channel: str, downloaded_ids: list = None, max_attempts: int = 10) -> dict:
+    """
+    특정 채널에서 랜덤으로 영상 하나를 선택하여 반환합니다.
+    멤버십 전용 영상과 이미 다운로드한 영상은 제외합니다.
+
+    Args:
+        channel: 채널명 (@로 시작) 또는 채널 ID
+        downloaded_ids: 이미 다운로드한 영상 ID 목록
+        max_attempts: 최대 시도 횟수
+
+    Returns:
+        dict: 영상 정보 (url, title, channel, duration, video_id)
+    """
+    if downloaded_ids is None:
+        downloaded_ids = []
+
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
         'extract_flat': True,
-        'default_search': 'ytsearch5',  # 상위 5개 결과 검색
+        'playlistend': 50,  # 더 많은 영상을 가져와서 선택 폭을 넓힘
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        result = ydl.extract_info(f"ytsearch5:{search_query}", download=False)
+        # 채널 URL 구성
+        if channel.startswith('@'):
+            channel_url = f"https://www.youtube.com/{channel}/videos"
+        else:
+            channel_url = f"https://www.youtube.com/channel/{channel}/videos"
 
-        if result and 'entries' in result and len(result['entries']) > 0:
-            video = result['entries'][0]
-            return {
-                'url': f"https://www.youtube.com/watch?v={video['id']}",
-                'title': video.get('title', 'Unknown Title')
-            }
+        result = ydl.extract_info(channel_url, download=False)
 
-    raise Exception("추천 영상을 찾을 수 없습니다.")
+        if result and 'entries' in result:
+            # None이 아닌 유효한 영상만 필터링
+            valid_videos = [v for v in result['entries'] if v is not None]
+
+            # 이미 다운로드한 영상 제외
+            new_videos = [v for v in valid_videos if v['id'] not in downloaded_ids]
+
+            if not new_videos:
+                print(f"    (모든 영상을 이미 다운로드함, 기록 초기화)")
+                new_videos = valid_videos
+
+            if new_videos:
+                # 영상 목록을 셔플하여 랜덤 순서로 시도
+                random.shuffle(new_videos)
+
+                for attempt, video in enumerate(new_videos[:max_attempts]):
+                    video_id = video['id']
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
+                    title = video.get('title', 'Unknown')
+
+                    # 영상 접근 가능 여부 확인
+                    if not is_video_accessible(video_url):
+                        print(f"    (멤버십/비공개 영상 건너뜀: {title[:30]}...)")
+                        continue
+
+                    # 영상 길이 가져오기
+                    duration = video.get('duration')
+                    duration_str = format_duration(duration)
+
+                    return {
+                        'url': video_url,
+                        'title': title,
+                        'channel': channel,
+                        'duration': duration_str,
+                        'video_id': video_id
+                    }
+
+    raise Exception(f"채널 '{channel}'에서 다운로드 가능한 영상을 찾을 수 없습니다.")
+
+
+def get_videos_from_all_channels(channels: list, history: dict) -> list:
+    """
+    모든 채널에서 각각 랜덤으로 영상 하나씩을 가져옵니다.
+    이미 다운로드한 영상은 제외합니다.
+
+    Args:
+        channels: 채널 목록
+        history: 다운로드 기록 {channel: [video_id, ...], ...}
+
+    Returns:
+        list: 영상 정보 목록 [{url, title, channel, video_id}, ...]
+    """
+    if not channels:
+        raise Exception("채널 목록이 비어있습니다. config.ini에 채널을 추가해주세요.")
+
+    videos = []
+    for channel in channels:
+        try:
+            print(f"  채널 '{channel}'에서 영상 선택 중...")
+            downloaded_ids = history.get(channel, [])
+            video = get_random_video_from_channel(channel, downloaded_ids)
+            videos.append(video)
+            duration_info = f" {video['duration']}" if video.get('duration') else ""
+            print(f"    → {video['title']}{duration_info}")
+        except Exception as e:
+            print(f"    → 오류: {e}")
+
+    if not videos:
+        raise Exception("어떤 채널에서도 영상을 가져오지 못했습니다.")
+
+    return videos
 
 
 def download_mp3(youtube_url: str, output_path: str) -> tuple:
@@ -188,13 +340,11 @@ def send_email(file_path: str, recipient_email: str, video_title: str, config: d
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = recipient_email
-    msg['Subject'] = f"[YouTube 자동 다운로드] {video_title}"
+    msg['Subject'] = f"[mp3 영상]{video_title}"
 
     # 본문 작성 (링크 유무에 따라 다르게)
     if drive_link:
         body = f"""안녕하세요,
-
-YouTube에서 자동 다운로드된 영상입니다.
 
 영상 제목: {video_title}
 
@@ -207,8 +357,6 @@ YouTube에서 자동 다운로드된 영상입니다.
 """
     else:
         body = f"""안녕하세요,
-
-YouTube에서 자동 다운로드된 영상입니다.
 
 영상 제목: {video_title}
 
@@ -263,8 +411,12 @@ def load_config(config_path: str = "config.ini") -> dict:
     config = configparser.ConfigParser()
     config.read(config_path, encoding='utf-8')
 
+    # 채널 목록 파싱 (쉼표로 구분)
+    channels_str = config.get('YOUTUBE', 'channels', fallback='')
+    channels = [ch.strip() for ch in channels_str.split(',') if ch.strip()]
+
     return {
-        'search_query': config.get('YOUTUBE', 'search_query', fallback='korean podcast talk'),
+        'channels': channels,
         'sender_email': config.get('EMAIL', 'sender_email'),
         'sender_password': config.get('EMAIL', 'sender_password'),
         'smtp_server': config.get('EMAIL', 'smtp_server'),
@@ -277,6 +429,7 @@ def load_config(config_path: str = "config.ini") -> dict:
 def main():
     """
     전체 프로세스를 실행합니다.
+    각 채널에서 랜덤으로 영상 1개씩 다운로드하여 이메일로 전송합니다.
     """
     print("=" * 50)
     print("YouTube 영상 다운로드 및 이메일 전송 자동화")
@@ -286,66 +439,99 @@ def main():
         # 설정 로드
         script_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(script_dir, 'config.ini')
+        history_path = os.path.join(script_dir, 'download_history.json')
 
-        print("\n[1/4] 설정 파일 로드 중...")
+        print("\n[1단계] 설정 파일 로드 중...")
         config = load_config(config_path)
-        print(f"  검색 키워드: {config['search_query']}")
+        history = load_download_history(history_path)
+        num_channels = len(config['channels'])
+        print(f"  등록된 채널: {num_channels}개")
+        for ch in config['channels']:
+            downloaded_count = len(history.get(ch, []))
+            print(f"    - {ch} (기록: {downloaded_count}개)")
         print(f"  수신자: {config['recipient_email']}")
 
-        # 1단계: YouTube 추천 영상 가져오기
-        print("\n[2/4] YouTube에서 추천 영상을 검색 중...")
-        video_info = get_recommended_video(config['search_query'])
-        print(f"  선택된 영상: {video_info['title']}")
-        print(f"  URL: {video_info['url']}")
+        # 2단계: 각 채널에서 영상 선택
+        print(f"\n[2단계] 각 채널에서 영상 선택 중...")
+        videos = get_videos_from_all_channels(config['channels'], history)
+        print(f"\n  총 {len(videos)}개 영상 선택됨")
 
-        # 2단계: MP3 다운로드
-        print("\n[3/4] MP3 파일 다운로드 중...")
-        output_path = os.path.join(script_dir, config['output_path'])
-        mp3_file, title = download_mp3(video_info['url'], output_path)
-        print(f"  다운로드 완료: {mp3_file}")
-
-        # 파일 크기 확인
-        file_size = os.path.getsize(mp3_file) / (1024 * 1024)  # MB
-        print(f"  파일 크기: {file_size:.2f} MB")
-
-        # 3단계: 25MB 초과 시 Google Drive 업로드
-        drive_link = None
-        if file_size > 25:
-            print(f"\n[4/5] 파일이 25MB를 초과하여 Google Drive에 업로드합니다...")
-            try:
-                drive_link = upload_to_drive(mp3_file)
-            except FileNotFoundError as e:
-                print(f"  오류: {e}")
-                print("  Google Drive 업로드를 건너뛰고 로컬 파일로 저장됩니다.")
-            except Exception as e:
-                print(f"  Google Drive 업로드 오류: {e}")
-                print("  로컬 파일로 저장됩니다.")
-
-        # 4단계: 이메일 전송
-        step = "[5/5]" if file_size > 25 else "[4/4]"
-        print(f"\n{step} 이메일 전송 중...")
+        # 이메일 설정
         email_config = {
             'sender_email': config['sender_email'],
             'sender_password': config['sender_password'],
             'smtp_server': config['smtp_server'],
             'smtp_port': config['smtp_port'],
         }
+        output_path = os.path.join(script_dir, config['output_path'])
 
-        success = send_email(
-            mp3_file,
-            config['recipient_email'],
-            video_info['title'],
-            email_config,
-            drive_link
-        )
+        # 3단계: 각 영상별로 다운로드 및 이메일 전송
+        success_count = 0
+        for i, video_info in enumerate(videos, 1):
+            duration_info = f" {video_info['duration']}" if video_info.get('duration') else ""
+            print(f"\n{'='*50}")
+            print(f"[{i}/{len(videos)}] {video_info['channel']}")
+            print(f"{'='*50}")
+            print(f"  영상: {video_info['title']}{duration_info}")
+            print(f"  URL: {video_info['url']}")
 
-        if success:
-            print("\n" + "=" * 50)
-            print("모든 작업이 성공적으로 완료되었습니다!")
-            print("=" * 50)
-        else:
-            print("\n이메일 전송에 실패했습니다.")
-            print(f"다운로드된 파일은 여기에 저장되어 있습니다: {mp3_file}")
+            try:
+                # MP3 다운로드
+                print(f"\n  다운로드 중...")
+                mp3_file, title = download_mp3(video_info['url'], output_path)
+                print(f"  다운로드 완료: {mp3_file}")
+
+                # 파일 크기 확인
+                file_size = os.path.getsize(mp3_file) / (1024 * 1024)  # MB
+                print(f"  파일 크기: {file_size:.2f} MB")
+
+                # 25MB 초과 시 Google Drive 업로드
+                drive_link = None
+                if file_size > 25:
+                    print(f"  파일이 25MB를 초과하여 Google Drive에 업로드합니다...")
+                    try:
+                        drive_link = upload_to_drive(mp3_file)
+                    except FileNotFoundError as e:
+                        print(f"  오류: {e}")
+                        print("  Google Drive 업로드를 건너뛰고 로컬 파일로 저장됩니다.")
+                    except Exception as e:
+                        print(f"  Google Drive 업로드 오류: {e}")
+                        print("  로컬 파일로 저장됩니다.")
+
+                # 이메일 전송
+                print(f"  이메일 전송 중...")
+                email_title = f"[{video_info['channel']}] {video_info['title']}{duration_info}"
+                success = send_email(
+                    mp3_file,
+                    config['recipient_email'],
+                    email_title,
+                    email_config,
+                    drive_link
+                )
+
+                if success:
+                    success_count += 1
+                    # 다운로드 기록에 추가
+                    channel = video_info['channel']
+                    video_id = video_info.get('video_id')
+                    if video_id:
+                        if channel not in history:
+                            history[channel] = []
+                        if video_id not in history[channel]:
+                            history[channel].append(video_id)
+                        save_download_history(history_path, history)
+                    print(f"  ✓ 완료!")
+                else:
+                    print(f"  ✗ 이메일 전송 실패")
+                    print(f"  다운로드된 파일: {mp3_file}")
+
+            except Exception as e:
+                print(f"  ✗ 오류 발생: {str(e)}")
+
+        # 최종 결과
+        print("\n" + "=" * 50)
+        print(f"작업 완료: {success_count}/{len(videos)}개 성공")
+        print("=" * 50)
 
     except FileNotFoundError:
         print("\n오류: config.ini 파일을 찾을 수 없습니다.")
