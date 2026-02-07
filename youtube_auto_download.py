@@ -32,10 +32,13 @@ except ImportError:
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # 쿠키 파일 경로 (Cloud Run: /cookies/cookies.txt, 로컬: ./cookies.txt)
+# Secret Manager 마운트는 읽기전용이므로 /tmp로 복사
+import shutil
 _cookies_candidate = os.environ.get('COOKIES_PATH', '/cookies/cookies.txt')
 if os.path.exists(_cookies_candidate):
-    COOKIES_PATH = _cookies_candidate
-    print(f"[쿠키] 쿠키 파일 발견: {COOKIES_PATH}")
+    COOKIES_PATH = '/tmp/cookies.txt'
+    shutil.copy2(_cookies_candidate, COOKIES_PATH)
+    print(f"[쿠키] 쿠키 파일 → {COOKIES_PATH} 복사 완료")
 else:
     COOKIES_PATH = None
     print(f"[쿠키] 쿠키 파일 없음: {_cookies_candidate}")
