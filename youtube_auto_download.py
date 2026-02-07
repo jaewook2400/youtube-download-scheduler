@@ -126,6 +126,7 @@ def is_video_accessible(video_url: str) -> bool:
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
     if COOKIES_PATH:
         ydl_opts['cookiefile'] = COOKIES_PATH
@@ -163,6 +164,7 @@ def get_random_video_from_channel(channel: str, downloaded_ids: list = None, max
         'no_warnings': True,
         'extract_flat': True,
         'playlistend': 50,  # 더 많은 영상을 가져와서 선택 폭을 넓힘
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
     if COOKIES_PATH:
         ydl_opts['cookiefile'] = COOKIES_PATH
@@ -272,6 +274,7 @@ def download_mp3(youtube_url: str, output_path: str) -> tuple:
         'outtmpl': f'{output_path}/%(title)s.%(ext)s',
         'quiet': False,
         'no_warnings': False,
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
     if COOKIES_PATH:
         ydl_opts['cookiefile'] = COOKIES_PATH
