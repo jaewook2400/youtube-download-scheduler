@@ -9,11 +9,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 스크립트 복사
+# 스크립트 복사 (민감 파일은 Secret Manager에서 마운트)
 COPY youtube_auto_download.py .
-COPY config.ini .
-COPY credentials.json .
-COPY token.json .
 
 # 다운로드 폴더 생성
 RUN mkdir -p downloads

@@ -25,6 +25,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+# Cloud Storage (Cloud Run 환경에서 download_history.json 영속화)
+try:
+    from google.cloud import storage as gcs_storage
+except ImportError:
+    gcs_storage = None
+
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 
@@ -45,6 +51,27 @@ def save_download_history(history_path: str, history: dict):
     """다운로드 기록을 저장합니다."""
     with open(history_path, 'w', encoding='utf-8') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def load_download_history_gcs(bucket_name: str, blob_name: str = 'download_history.json') -> dict:
+    """Cloud Storage에서 다운로드 기록을 로드합니다."""
+    client = gcs_storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    if blob.exists():
+        return json.loads(blob.download_as_text())
+    return {}
+
+
+def save_download_history_gcs(bucket_name: str, history: dict, blob_name: str = 'download_history.json'):
+    """Cloud Storage에 다운로드 기록을 저장합니다."""
+    client = gcs_storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(
+        json.dumps(history, ensure_ascii=False, indent=2),
+        content_type='application/json'
+    )
 
 
 def format_duration(seconds) -> str:
@@ -273,8 +300,11 @@ def get_drive_service():
             flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
             creds = flow.run_local_server(port=0)
 
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
+        try:
+            with open(token_path, 'w') as token:
+                token.write(creds.to_json())
+        except PermissionError:
+            print("  token.json 저장 불가 (읽기 전용 마운트). 다음 실행 시 다시 갱신됩니다.")
 
     return build('drive', 'v3', credentials=creds)
 
@@ -440,10 +470,15 @@ def main():
         script_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(script_dir, 'config.ini')
         history_path = os.path.join(script_dir, 'download_history.json')
+        gcs_bucket = os.environ.get('GCS_BUCKET')
 
         print("\n[1단계] 설정 파일 로드 중...")
         config = load_config(config_path)
-        history = load_download_history(history_path)
+        if gcs_bucket and gcs_storage:
+            print(f"  Cloud Storage 모드: gs://{gcs_bucket}")
+            history = load_download_history_gcs(gcs_bucket)
+        else:
+            history = load_download_history(history_path)
         num_channels = len(config['channels'])
         print(f"  등록된 채널: {num_channels}개")
         for ch in config['channels']:
@@ -519,7 +554,10 @@ def main():
                             history[channel] = []
                         if video_id not in history[channel]:
                             history[channel].append(video_id)
-                        save_download_history(history_path, history)
+                        if gcs_bucket and gcs_storage:
+                            save_download_history_gcs(gcs_bucket, history)
+                        else:
+                            save_download_history(history_path, history)
                     print(f"  ✓ 완료!")
                 else:
                     print(f"  ✗ 이메일 전송 실패")
