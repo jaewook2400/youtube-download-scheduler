@@ -31,6 +31,11 @@ except ImportError:
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
+# 쿠키 파일 경로 (Cloud Run: /cookies/cookies.txt, 로컬: ./cookies.txt)
+COOKIES_PATH = os.environ.get('COOKIES_PATH', '/cookies/cookies.txt')
+if not os.path.exists(COOKIES_PATH):
+    COOKIES_PATH = None
+
 
 def load_download_history(history_path: str) -> dict:
     """
@@ -115,6 +120,8 @@ def is_video_accessible(video_url: str) -> bool:
         'no_warnings': True,
         'skip_download': True,
     }
+    if COOKIES_PATH:
+        ydl_opts['cookiefile'] = COOKIES_PATH
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -150,6 +157,8 @@ def get_random_video_from_channel(channel: str, downloaded_ids: list = None, max
         'extract_flat': True,
         'playlistend': 50,  # 더 많은 영상을 가져와서 선택 폭을 넓힘
     }
+    if COOKIES_PATH:
+        ydl_opts['cookiefile'] = COOKIES_PATH
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         # 채널 URL 구성
@@ -257,6 +266,8 @@ def download_mp3(youtube_url: str, output_path: str) -> tuple:
         'quiet': False,
         'no_warnings': False,
     }
+    if COOKIES_PATH:
+        ydl_opts['cookiefile'] = COOKIES_PATH
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(youtube_url, download=True)
