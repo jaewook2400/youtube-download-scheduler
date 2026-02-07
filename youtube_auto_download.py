@@ -19,9 +19,7 @@ from email import encoders
 import yt_dlp
 
 # Google Drive API
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+import google.auth
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -275,37 +273,8 @@ def download_mp3(youtube_url: str, output_path: str) -> tuple:
 
 
 def get_drive_service():
-    """
-    Google Drive API 서비스를 가져옵니다.
-    첫 실행 시 브라우저에서 인증이 필요합니다.
-    """
-    creds = None
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    token_path = os.path.join(script_dir, 'token.json')
-    credentials_path = os.path.join(script_dir, 'credentials.json')
-
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(credentials_path):
-                raise FileNotFoundError(
-                    "credentials.json 파일이 없습니다.\n"
-                    "Google Cloud Console에서 OAuth 클라이언트 ID를 생성하고\n"
-                    "credentials.json 파일을 다운로드해주세요."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        try:
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
-        except PermissionError:
-            print("  token.json 저장 불가 (읽기 전용 마운트). 다음 실행 시 다시 갱신됩니다.")
-
+    """Google Drive API 서비스를 가져옵니다. (ADC 사용)"""
+    creds, _ = google.auth.default(scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 
