@@ -23,7 +23,7 @@ steps:
       - 'run'
       - 'jobs'
       - 'update'
-      - 'youtube-download-job'
+      - 'youtube-download-scheduler'
       - '--image'
       - 'asia-northeast3-docker.pkg.dev/$PROJECT_ID/youtube-download/youtube-downloader:$COMMIT_SHA'
       - '--region'
