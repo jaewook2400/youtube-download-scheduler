@@ -1,0 +1,30 @@
+name: YouTube Download
+
+on:
+  schedule:
+    # 매일 오후 7시 KST = 10:00 UTC
+    - cron: '0 10 * * *'
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install yt-dlp google-auth google-auth-oauthlib google-api-python-client
+          ffmpeg -version
+
+      - name: Create config.ini
+        run: echo "${{ secrets.CONFIG_INI }}" > config.ini
+
+      - name: Run download script
+        run: python youtube_auto_download.py
